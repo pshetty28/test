@@ -1,0 +1,60 @@
+pipeline {
+  environment {
+    registry = "gcr.io/basic-342606/busybox"
+    registryCredential = 'serviceaccount'
+    repo = 'enter your repo url'
+    sonarqube_server='server name'
+    dockerImage = ''
+  }
+  agent any
+  stages {
+    stage('Cloning Git') {
+      steps {
+        git repo
+      }
+    }
+    stage('compile') {
+      steps {
+        script{
+           sh "mvn package"
+        }
+      }
+    }
+    stage('build && SonarQube analysis') {
+      steps {
+        withSonarQubeEnv(sonarqube_server) {
+          sh 'mvn clean package sonar:sonar'
+        }
+      }
+    }
+    stage("Quality Gate") {
+      steps {
+        timeout(time: 1, unit: 'HOURS') {
+            waitForQualityGate abortPipeline: true
+        }
+      }
+    }
+    stage('Building image') {
+      steps{
+        script {
+          dockerImage = docker.build registry + ":$BUILD_NUMBER"
+        }
+      }
+    }
+    stage('Deploy Image') {
+      steps{
+        script {
+         sh '''#!/bin/bash
+               gcloud auth activate-service-account jenkins@basic-342606.iam.gserviceaccount.com --key-file=registryCredential
+               docker push $registry:$BUILD_NUMBER '''
+        }
+      }
+    }
+    
+    stage('Remove Unused docker image') {
+      steps{
+        sh "docker rmi $registry:$BUILD_NUMBER"
+      }
+    }
+  }
+}
